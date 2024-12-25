@@ -1,161 +1,121 @@
-use std::{borrow::Borrow, cell::RefCell, ptr::NonNull, rc::Rc};
+use std::ptr::NonNull;
 
-use egui::{Context, Ui};
+use egui::{Color32, Context, Ui};
 use miniquad::conf;
-use mlua::{FromLua, IntoLua, Lua, UserData, UserDataMethods, Value};
-use system::Vapo;
+use mlua::prelude::*;
+use mlua::{Either, Lua, ObjectLike, Table, UserData, UserDataMethods, Value};
+use refs::StrRef;
+use system::System;
 
-mod system {
+pub struct Vapo {
+    lua: Lua,
+    gui: GUIData,
+    error: Option<String>,
+    shoud_close: bool,
+}
 
-    use miniquad::{self as mq, conf};
-
-    use crate::GUIData;
-
-    pub struct Vapo {
-        egui_mq: egui_miniquad::EguiMq,
-        mq_ctx: Box<dyn mq::RenderingBackend>,
-        gui: GUIData,
-    }
-
-    impl Vapo {
-        pub fn new(gui: GUIData) -> Self {
-            let mut mq_ctx = mq::window::new_rendering_backend();
-            Self {
-                egui_mq: egui_miniquad::EguiMq::new(&mut *mq_ctx),
-                mq_ctx,
-                gui,
+impl Vapo {
+    pub(crate) fn main_window(&mut self, ctx: &Context) {
+        egui::CentralPanel::default().show(&ctx, |ui| {
+            if let Some(ref err) = self.error {
+                ui.colored_label(
+                    Color32::from_rgb(0xaa, 0x66, 0x66),
+                    "An Error has Occoured!",
+                );
+                ui.label(err);
+                if ui.button("Quit").clicked() {
+                    self.request_quit();
+                }
+            } else {
+                self.gui.ui = Some(NonNull::from(ui));
+                if let Err(e) = self.draw() {
+                    eprintln!("Error: {e}");
+                    self.error = Some(e.to_string());
+                }
+                self.gui.ui = None;
             }
-        }
+        });
     }
 
-    impl mq::EventHandler for Vapo {
-        fn update(&mut self) {}
+    pub(crate) fn draw(&mut self) -> mlua::Result<()> {
+        self.lua.scope(|scope| {
+            let ui = scope.create_userdata_ref_mut(&mut self.gui)?;
+            self.lua
+                .globals()
+                .get::<Table>("vapo")?
+                .call_function::<()>("draw", (ui,))?;
 
-        fn draw(&mut self) {
-            self.mq_ctx
-                .begin_default_pass(mq::PassAction::clear_color(0.0, 0.0, 0.0, 1.0));
-            self.mq_ctx.end_render_pass();
+            Ok(())
+        })?;
+        Ok(())
+    }
 
-            self.egui_mq.run(&mut *self.mq_ctx, |_mq_ctx, egui_ctx| {
-                self.gui.main_window(egui_ctx)
-            });
-
-            // Draw things behind egui here
-
-            self.egui_mq.draw(&mut *self.mq_ctx);
-
-            // Draw things in front of egui here
-
-            self.mq_ctx.commit_frame();
-        }
-
-        fn mouse_motion_event(&mut self, x: f32, y: f32) {
-            self.egui_mq.mouse_motion_event(x, y);
-        }
-
-        fn mouse_wheel_event(&mut self, dx: f32, dy: f32) {
-            self.egui_mq.mouse_wheel_event(dx, dy);
-        }
-
-        fn mouse_button_down_event(&mut self, mb: mq::MouseButton, x: f32, y: f32) {
-            self.egui_mq.mouse_button_down_event(mb, x, y);
-        }
-
-        fn mouse_button_up_event(&mut self, mb: mq::MouseButton, x: f32, y: f32) {
-            self.egui_mq.mouse_button_up_event(mb, x, y);
-        }
-
-        fn char_event(&mut self, character: char, _keymods: mq::KeyMods, _repeat: bool) {
-            self.egui_mq.char_event(character);
-        }
-
-        fn key_down_event(&mut self, keycode: mq::KeyCode, keymods: mq::KeyMods, _repeat: bool) {
-            self.egui_mq.key_down_event(keycode, keymods);
-        }
-
-        fn key_up_event(&mut self, keycode: mq::KeyCode, keymods: mq::KeyMods) {
-            self.egui_mq.key_up_event(keycode, keymods);
-        }
+    pub fn request_quit(&mut self) {
+        self.shoud_close = true;
+        miniquad::window::request_quit();
     }
 }
 
+#[cfg(feature = "miniquad")]
+mod system;
+#[cfg(feature = "sdl")]
+mod system_sdl;
+#[cfg(feature = "sdl")]
+use systemd_sdl as system;
+
+#[cfg(all(feature = "miniquad", feature = "sdl"))]
+compile_error!("You can't have both backends");
+
+#[derive(Default)]
 struct GUIData {
-    lua: Lua,
     ui: Option<NonNull<Ui>>,
 }
 
 impl GUIData {
-    pub fn main_window(&mut self, ctx: &Context) {
-        egui::CentralPanel::default().show(&ctx, |ui| {
-            self.ui = Some(NonNull::from(ui));
-            self.draw();
-            self.ui = None;
-        });
-    }
     pub fn ui(&self) -> &mut Ui {
-        unsafe { self.ui.unwrap().as_mut() }
+        unsafe {
+            self.ui
+                .expect("Called ui function out of context.")
+                .as_mut()
+        }
     }
-    pub fn draw(&self) {}
+
+    fn lua_label(&self, lua: &Lua, (label,): (Value,)) -> mlua::Result<()> {
+        if let Some(label) = lua.coerce_string(label)? {
+            self.ui().label(&*label.to_str()?);
+        } else {
+            self.ui().label("[Unknown]");
+        }
+        Ok(())
+    }
+    fn lua_input(&self, _lua: &Lua, (sref,): (StrRef,)) -> mlua::Result<()> {
+        self.ui().text_edit_singleline(&mut *sref.mut_());
+        Ok(())
+    }
 }
 
 impl UserData for GUIData {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("label", |lua, this, (label,): (Value,)| {});
-    }
-}
-#[derive(Clone, Default)]
-struct Ref<T> {
-    data: Rc<RefCell<T>>,
-}
-
-impl<T> Ref<T> {
-    pub fn new(val: T) -> Self {
-        Self {
-            data: Rc::new(RefCell::new(val)),
+        macro_rules! method {
+            ($name:expr, $ident:ident) => {
+                methods.add_method($name, |lua, this, args| Self::$ident(this, lua, args))
+            };
+            (mut $name:expr, $ident:ident) => {
+                methods.add_method_mut($name, |lua, this, args| Self::$ident(this, lua, args))
+            };
         }
-    }
-    pub fn ref_(&self) -> std::cell::Ref<T> {
-        (*self.data).borrow()
-    }
-
-    pub fn mut_(&self) -> std::cell::RefMut<T> {
-        (*self.data).borrow_mut()
+        method!("label", lua_label);
+        method!("input", lua_input);
     }
 }
 
-type StrRef = Ref<String>;
-
-trait AsLua {
-    fn into_lua(&self, lua: &Lua) -> mlua::Result<Value>;
-}
-
-trait DualLua: FromLua + AsLua {}
-impl<T> DualLua for T where T: FromLua + AsLua {}
-
-impl AsLua for String {
-    fn into_lua(&self, lua: &Lua) -> mlua::Result<Value> {
-        self.as_str().into_lua(lua)
-    }
-}
-
-impl<T> UserData for Ref<T>
-where
-    T: DualLua,
-{
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("get", |lua, this, ()| this.ref_().into_lua(lua));
-        methods.add_method("set", |lua, this, (value,)| {
-            *this.mut_() = T::from_lua(value, lua)?;
-            Ok(())
-        });
-    }
-}
+mod refs;
 
 fn init_lua(lua: &mut Lua) -> Result<(), mlua::Error> {
     let vapo = lua.create_table()?;
     vapo.set(
         "dstr",
-        lua.create_function(|lua, ()| Ok(StrRef::default()))?,
+        lua.create_function(|_lua, ()| Ok(StrRef::default()))?,
     )?;
     lua.globals().set("vapo", vapo)?;
     Ok(())
@@ -166,8 +126,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut lua = Lua::new();
     init_lua(&mut lua)?;
     let source = std::fs::read_to_string("vapo.lua")?;
+    lua.load(source).set_name("vapo.lua").exec()?;
     conf.platform.apple_gfx_api = conf::AppleGfxApi::Metal;
     // conf.platform.linux_backend = LinuxBackend::WaylandOnly;
-    miniquad::start(conf, move || Box::new(Vapo::new(GUIData { lua, ui: None })));
+    miniquad::start(conf, move || {
+        Box::new(System::new(Vapo {
+            lua,
+            error: None,
+            shoud_close: false,
+            gui: GUIData::default(),
+        }))
+    });
     Ok(())
 }
