@@ -1,17 +1,15 @@
 use std::ptr::NonNull;
 
 use egui::{Color32, Context, Ui};
-use miniquad::conf;
 use mlua::prelude::*;
-use mlua::{Either, Lua, ObjectLike, Table, UserData, UserDataMethods, Value};
+use mlua::{Lua, ObjectLike, Table, UserData, UserDataMethods, Value};
 use refs::StrRef;
-use system::System;
 
 pub struct Vapo {
-    lua: Lua,
-    gui: GUIData,
-    error: Option<String>,
-    shoud_close: bool,
+    pub lua: Lua,
+    pub gui: GUIData,
+    pub error: Option<String>,
+    pub should_close: bool,
 }
 
 impl Vapo {
@@ -51,23 +49,14 @@ impl Vapo {
     }
 
     pub fn request_quit(&mut self) {
-        self.shoud_close = true;
-        miniquad::window::request_quit();
+        self.should_close = true;
     }
 }
 
-#[cfg(feature = "miniquad")]
 mod system;
-#[cfg(feature = "sdl")]
-mod system_sdl;
-#[cfg(feature = "sdl")]
-use systemd_sdl as system;
-
-#[cfg(all(feature = "miniquad", feature = "sdl"))]
-compile_error!("You can't have both backends");
 
 #[derive(Default)]
-struct GUIData {
+pub struct GUIData {
     ui: Option<NonNull<Ui>>,
 }
 
@@ -89,7 +78,12 @@ impl GUIData {
         Ok(())
     }
     fn lua_input(&self, _lua: &Lua, (sref,): (StrRef,)) -> mlua::Result<()> {
+        let before = sref.ref_().clone();
         self.ui().text_edit_singleline(&mut *sref.mut_());
+        let new = sref.ref_();
+        if before != *new {
+            println!("{before} => {}", *new)
+        }
         Ok(())
     }
 }
@@ -122,20 +116,16 @@ fn init_lua(lua: &mut Lua) -> Result<(), mlua::Error> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut conf = miniquad::conf::Conf::default();
     let mut lua = Lua::new();
     init_lua(&mut lua)?;
     let source = std::fs::read_to_string("vapo.lua")?;
     lua.load(source).set_name("vapo.lua").exec()?;
-    conf.platform.apple_gfx_api = conf::AppleGfxApi::Metal;
-    // conf.platform.linux_backend = LinuxBackend::WaylandOnly;
-    miniquad::start(conf, move || {
-        Box::new(System::new(Vapo {
-            lua,
-            error: None,
-            shoud_close: false,
-            gui: GUIData::default(),
-        }))
-    });
+    let vapo = Vapo {
+        lua,
+        error: None,
+        should_close: false,
+        gui: GUIData::default(),
+    };
+    system::run(vapo);
     Ok(())
 }

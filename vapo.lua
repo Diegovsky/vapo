@@ -1,7 +1,6 @@
 local query = vapo.dstr()
 
 function vapo.draw(ui)
-  ui:label("Choose your thing")
+  ui:label("Digite algo:")
   ui:input(query)
-  ui:label(string.format("Query: %s", query))
 end

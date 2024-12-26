@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = ["miniquad"]
-miniquad = ["dep:egui-miniquad"]
+default = ["sdl"]
+miniquad = ["dep:egui-miniquad", "dep:miniquad"]
 sdl = ["dep:egui_sdl2_gl"]
 
 [dependencies]
 egui = "0.28.0"
 egui-miniquad = {version = "0.15.0", optional=true}
-egui_sdl2_gl = {version = "0.28.0", optional=true}
-miniquad = "0.4.0"
+egui_sdl2_gl = {version = "0.28.0", optional=true, default-features=false}
+miniquad = {version="0.4.0", optional=true}
 mlua = { version = "0.10.2", features = ["luajit"] }
