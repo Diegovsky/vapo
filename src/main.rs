@@ -1,3 +1,4 @@
+use std::ops::Deref;
 use std::ptr::NonNull;
 
 use egui::{Color32, Context, Ui};
@@ -68,23 +69,33 @@ impl GUIData {
                 .as_mut()
         }
     }
-
-    fn lua_label(&self, lua: &Lua, (label,): (Value,)) -> mlua::Result<()> {
-        if let Some(label) = lua.coerce_string(label)? {
-            self.ui().label(&*label.to_str()?);
+    fn get_string<T>(
+        &self,
+        lua: &Lua,
+        value: Value,
+        access: impl FnOnce(&str) -> T,
+    ) -> mlua::Result<T> {
+        Ok(if let Some(value) = lua.coerce_string(value)? {
+            access(&*value.to_str()?)
         } else {
-            self.ui().label("[Unknown]");
-        }
+            access("[Unknown]")
+        })
+    }
+    fn lua_label(&self, lua: &Lua, (label,): (Value,)) -> mlua::Result<()> {
+        let ui = self.ui();
+        self.get_string(lua, label, |label| ui.label(label))?;
         Ok(())
     }
+
     fn lua_input(&self, _lua: &Lua, (sref,): (StrRef,)) -> mlua::Result<()> {
-        let before = sref.ref_().clone();
         self.ui().text_edit_singleline(&mut *sref.mut_());
-        let new = sref.ref_();
-        if before != *new {
-            println!("{before} => {}", *new)
-        }
         Ok(())
+    }
+    fn lua_button(&self, lua: &Lua, (label,): (Value,)) -> mlua::Result<bool> {
+        let clicked = self
+            .get_string(lua, label, |label| self.ui().button(label))?
+            .clicked();
+        Ok(clicked)
     }
 }
 
@@ -100,6 +111,7 @@ impl UserData for GUIData {
         }
         method!("label", lua_label);
         method!("input", lua_input);
+        method!("button", lua_button);
     }
 }
 

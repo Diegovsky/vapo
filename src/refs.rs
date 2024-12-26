@@ -50,6 +50,7 @@ where
     fn add_methods<M: LuaUserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("get", |lua, this, ()| this.ref_().as_lua(lua));
         methods.add_method("set", |lua, this, (value,)| {
+            dbg!(&value);
             *this.mut_() = T::from_lua(value, lua)?;
             Ok(())
         });
