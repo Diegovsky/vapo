@@ -2,9 +2,7 @@ use egui_backend::egui::FullOutput;
 use egui_backend::sdl2::video::GLProfile;
 use egui_backend::{DpiScaling, ShaderVersion, sdl2::event::Event};
 use egui_backend::{egui, gl, sdl2};
-use egui_sdl2_gl::sdl2::event::WindowEvent;
 use egui_sdl2_gl::sdl2::keyboard::Keycode;
-use egui_sdl2_gl::sdl2::sys::KeyCode;
 use std::time::Instant;
 // Alias the backend to something less mouthful
 use egui_sdl2_gl as egui_backend;

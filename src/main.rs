@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::ptr::NonNull;
 
 use egui::{Color32, Context, Ui};
